@@ -1,0 +1,106 @@
+Metadata-Version: 2.4
+Name: cloudmasking
+Version: 0.1.0
+Summary: AI-powered cloud and cloud-shadow masking for satellite imagery (CloudSEN12 baseline)
+Author: cloudmasking
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+Requires-Dist: numpy>=1.26
+Requires-Dist: tqdm>=4.66
+Requires-Dist: pyyaml>=6.0
+Requires-Dist: pillow>=10.0
+Requires-Dist: matplotlib>=3.8
+Requires-Dist: scikit-image>=0.22
+Requires-Dist: opencv-python>=4.9
+Requires-Dist: rasterio>=1.3.10
+Requires-Dist: torch>=2.1
+Requires-Dist: torchvision>=0.16
+Requires-Dist: tacoreader>=2.0
+Provides-Extra: cloudsen12
+Requires-Dist: datasets>=2.19; extra == "cloudsen12"
+Requires-Dist: huggingface-hub>=0.23; extra == "cloudsen12"
+
+# Cloud + Shadow Masking (CloudSEN12 baseline)
+
+This repo trains a simple semantic-segmentation model to detect **clouds** and **cloud shadows** in Sentinel-2 imagery, then exports masks and a masked GeoTIFF for agriculture analysis.
+
+## What it produces
+
+- `mask_classes.tif`: 0=clear, 1=cloud (thick+thin), 2=shadow
+- `mask_cloud.tif`: 255 where cloud, else 0
+- `mask_shadow.tif`: 255 where shadow, else 0
+- `masked_image.tif`: input image with cloud/shadow pixels set to nodata
+
+## Setup (Windows, NVIDIA GPU)
+
+1) Create a project venv (your preferred workflow):
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -U pip
+```
+
+2) Install PyTorch with CUDA inside THIS venv (this is what makes GPU work per-project):
+- https://pytorch.org/get-started/locally/
+
+3) Install the rest (keep your venv activated):
+
+```powershell
+pip install -r requirements.txt
+pip install -e .
+```
+
+4) Quick GPU check (must print CUDA available: True):
+
+```powershell
+cloudmask check --device cuda
+```
+
+## Training (CloudSEN12 via TACO)
+
+CloudSEN12 is provided as a Cloud-Optimized Dataset (TACO). This project uses `tacoreader` to read the dataset and cache it locally.
+
+- Use `--data` as your **cache folder** (you said you will store it in this project folder, so use `.\data\cloudsen12_cache`).
+
+### Sanity run (small)
+
+```powershell
+cloudmask train `
+  --data .\data\cloudsen12_cache `
+  --out  .\runs `
+  --epochs 2 `
+  --batch-size 4 `
+  --img-size 256 `
+  --limit-train 64 `
+  --limit-val 16
+```
+
+This creates:
+- `runs/run_*/checkpoints/best.pt`
+
+### Real training
+
+Increase epochs and remove limits:
+
+```powershell
+cloudmask train --data .\data\cloudsen12_cache --out .\runs --epochs 20 --batch-size 8 --img-size 256
+```
+
+## Inference on a GeoTIFF
+
+You need a GeoTIFF with Sentinel-2-like band ordering (so that band numbers match training bands). The default checkpoint expects bands `(4,3,2,8)` = (Red, Green, Blue, NIR).
+
+```powershell
+cloudmask predict `
+  --ckpt .\runs\run_YYYYMMDD_HHMMSS\checkpoints\best.pt `
+  --input .\your_scene.tif `
+  --out .\outputs\scene1 `
+  --tile 512 `
+  --overlap 64
+```
+
+## Notes
+
+- Labels are remapped from CloudSEN12 classes to 3 classes: clear / cloud / shadow.
+- Pixels labeled as 99 (no-data) are ignored during training.

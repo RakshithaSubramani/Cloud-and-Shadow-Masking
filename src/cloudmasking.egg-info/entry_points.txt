@@ -1,0 +1,2 @@
+[console_scripts]
+cloudmask = cloudmasking.cli:main

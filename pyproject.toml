@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cloudmasking"
+version = "0.1.0"
+description = "AI-powered cloud and cloud-shadow masking for satellite imagery (CloudSEN12 baseline)"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{ name = "cloudmasking" }]
+dependencies = [
+  "numpy>=1.26",
+  "tqdm>=4.66",
+  "pyyaml>=6.0",
+  "pillow>=10.0",
+  "matplotlib>=3.8",
+  "scikit-image>=0.22",
+  "opencv-python>=4.9",
+  "rasterio>=1.3.10",
+  "torch>=2.1",
+  "torchvision>=0.16",
+  "tacoreader>=2.0",
+]
+
+[project.optional-dependencies]
+cloudsen12 = [
+  "datasets>=2.19",
+  "huggingface-hub>=0.23",
+]
+
+[project.scripts]
+cloudmask = "cloudmasking.cli:main"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
