@@ -5,6 +5,7 @@ src/cloudmasking/cli.py
 src/cloudmasking/env.py
 src/cloudmasking/metrics.py
 src/cloudmasking/predict.py
+src/cloudmasking/prepare.py
 src/cloudmasking/train.py
 src/cloudmasking/utils.py
 src/cloudmasking.egg-info/PKG-INFO
@@ -15,5 +16,6 @@ src/cloudmasking.egg-info/requires.txt
 src/cloudmasking.egg-info/top_level.txt
 src/cloudmasking/data/__init__.py
 src/cloudmasking/data/cloudsen12_taco.py
+src/cloudmasking/data/prepared_npz.py
 src/cloudmasking/models/__init__.py
 src/cloudmasking/models/unet.py

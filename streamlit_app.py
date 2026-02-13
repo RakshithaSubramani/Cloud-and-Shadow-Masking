@@ -9,6 +9,7 @@ import numpy as np
 import rasterio as rio
 import streamlit as st
 from PIL import Image
+from rasterio.enums import ColorInterp
 
 from cloudmasking.predict import predict_geotiff
 
@@ -36,7 +37,6 @@ def _zip_dir_bytes(folder: Path) -> bytes:
 
 def _to_uint8_rgb(rgb: np.ndarray) -> np.ndarray:
     rgb = rgb.astype(np.float32)
-    rgb = np.clip(rgb / 10000.0, 0.0, 1.0)
     out = np.empty_like(rgb, dtype=np.uint8)
     for c in range(3):
         band = rgb[c]
@@ -50,11 +50,28 @@ def _to_uint8_rgb(rgb: np.ndarray) -> np.ndarray:
 
 
 def _choose_rgb_bands(src: rio.DatasetReader) -> list[int]:
-    if src.count >= 4:
+    try:
+        cis = list(src.colorinterp)
+        if cis:
+            r = cis.index(ColorInterp.red) + 1 if ColorInterp.red in cis else None
+            g = cis.index(ColorInterp.green) + 1 if ColorInterp.green in cis else None
+            b = cis.index(ColorInterp.blue) + 1 if ColorInterp.blue in cis else None
+            if r and g and b:
+                return [r, g, b]
+    except Exception:
+        pass
+
+    if src.count == 4:
+        return [1, 2, 3]
+    if src.count > 4:
         return [4, 3, 2]
     if src.count >= 3:
         return [1, 2, 3]
-    raise ValueError("Input must have at least 3 bands to create an RGB preview.")
+    if src.count == 2:
+        return [1, 2, 2]
+    if src.count == 1:
+        return [1, 1, 1]
+    raise ValueError("Input must have at least 1 band to create an RGB preview.")
 
 
 @st.cache_data(show_spinner=False)
@@ -64,7 +81,19 @@ def _rgb_preview_png(path: str, max_side: int = 512) -> bytes:
         out_h = max(1, int(round(src.height * scale)))
         out_w = max(1, int(round(src.width * scale)))
         bands = _choose_rgb_bands(src)
-        rgb16 = src.read(bands, out_shape=(3, out_h, out_w), resampling=rio.enums.Resampling.bilinear)
+        try:
+            rgb16 = src.read(
+                bands, out_shape=(3, out_h, out_w), resampling=rio.enums.Resampling.bilinear
+            )
+        except Exception:
+            safe = [b for b in (1, 2, 3) if b <= src.count]
+            if not safe:
+                safe = [1]
+            while len(safe) < 3:
+                safe.append(safe[-1])
+            rgb16 = src.read(
+                safe, out_shape=(3, out_h, out_w), resampling=rio.enums.Resampling.bilinear
+            )
         rgb8 = _to_uint8_rgb(rgb16).transpose(1, 2, 0)
         buf = io.BytesIO()
         Image.fromarray(rgb8).save(buf, format="PNG")
@@ -86,6 +115,20 @@ def _cloudsen12_sample_uri(dataset: str, index: int, cache_dir: str) -> str:
     return str(sample.read(0))
 
 
+def _st_image(container, image, caption: str):
+    try:
+        return container.image(image, caption=caption, width="stretch")
+    except TypeError:
+        try:
+            return container.image(image, caption=caption, use_container_width=True)
+        except TypeError:
+            pass
+        try:
+            return container.image(image, caption=caption, use_column_width=True)
+        except TypeError:
+            return container.image(image, caption=caption)
+
+
 def main() -> None:
     st.set_page_config(page_title="Cloud + Shadow Masking", layout="wide")
     st.title("Cloud + Shadow Masking")
@@ -96,6 +139,13 @@ def main() -> None:
 
     with st.sidebar:
         st.header("Model")
+        mask_method_ui = st.selectbox(
+            "Masking method",
+            options=["AI model", "Simple RGB (white clouds)"],
+            index=1,
+        )
+        mask_method = "model" if mask_method_ui == "AI model" else "rgb_white"
+
         ckpt_mode = st.radio("Checkpoint", ["Pick latest run", "Enter path", "Upload .pt"], index=0)
 
         ckpt_path: Path | None = None
@@ -128,6 +178,27 @@ def main() -> None:
         cache_dir = root / "data" / "cloudsen12_cache"
         cache_dir_text = st.text_input("CloudSEN12 cache dir", value=str(cache_dir))
 
+        st.header("Masking")
+        if mask_method == "model":
+            mask_shadow = st.checkbox("Mask shadows too", value=False)
+            use_thresholds = st.checkbox("Use confidence threshold", value=True)
+            if use_thresholds:
+                cloud_threshold = st.slider("Cloud threshold", 0.0, 1.0, 0.6, 0.05)
+                shadow_threshold = (
+                    st.slider("Shadow threshold", 0.0, 1.0, 0.6, 0.05) if mask_shadow else None
+                )
+            else:
+                cloud_threshold = None
+                shadow_threshold = None
+            rgb_brightness_threshold = 0.8
+            rgb_whiteness_threshold = 0.2
+        else:
+            mask_shadow = False
+            cloud_threshold = None
+            shadow_threshold = None
+            rgb_brightness_threshold = st.slider("Brightness (cloud)", 0.0, 1.0, 0.8, 0.02)
+            rgb_whiteness_threshold = st.slider("Whiteness (cloud)", 0.0, 1.0, 0.2, 0.02)
+
     input_path: Path | str | None = None
     sample_dataset: str | None = None
     sample_index: int | None = None
@@ -153,12 +224,12 @@ def main() -> None:
         try:
             cache_dir_resolved = str(Path(cache_dir_text).expanduser().resolve())
             input_preview_uri = _cloudsen12_sample_uri(sample_dataset, sample_index, cache_dir_resolved)
-            before_col.image(_rgb_preview_png(input_preview_uri), caption="Before (Input RGB)", use_container_width=True)
+            _st_image(before_col, _rgb_preview_png(input_preview_uri), caption="Before (Input RGB)")
         except Exception as e:  # noqa: BLE001
             before_col.info(f"Input preview will appear after the first download/caching. Details: {e}")
     elif input_preview_uri is not None:
         try:
-            before_col.image(_rgb_preview_png(input_preview_uri), caption="Before (Input RGB)", use_container_width=True)
+            _st_image(before_col, _rgb_preview_png(input_preview_uri), caption="Before (Input RGB)")
         except Exception as e:  # noqa: BLE001
             before_col.info(f"Could not render input preview: {e}")
     else:
@@ -167,9 +238,10 @@ def main() -> None:
     run_btn = st.button("Run Masking", type="primary", use_container_width=True)
 
     if run_btn:
-        if ckpt_path is None or not ckpt_path.exists():
-            st.error("Checkpoint not found. Pick a run, enter a valid path, or upload a .pt file.")
-            return
+        if mask_method == "model":
+            if ckpt_path is None or not ckpt_path.exists():
+                st.error("Checkpoint not found. Pick a run, enter a valid path, or upload a .pt file.")
+                return
         if input_path is None:
             st.error("Input not provided.")
             return
@@ -190,6 +262,12 @@ def main() -> None:
                     device=device,
                     tile_size=tile_size,
                     overlap=overlap,
+                    mask_shadow=mask_shadow,
+                    cloud_threshold=cloud_threshold,
+                    shadow_threshold=shadow_threshold,
+                    mask_method=mask_method,
+                    rgb_brightness_threshold=rgb_brightness_threshold,
+                    rgb_whiteness_threshold=rgb_whiteness_threshold,
                 )
             else:
                 predict_geotiff(
@@ -199,6 +277,12 @@ def main() -> None:
                     device=device,
                     tile_size=tile_size,
                     overlap=overlap,
+                    mask_shadow=mask_shadow,
+                    cloud_threshold=cloud_threshold,
+                    shadow_threshold=shadow_threshold,
+                    mask_method=mask_method,
+                    rgb_brightness_threshold=rgb_brightness_threshold,
+                    rgb_whiteness_threshold=rgb_whiteness_threshold,
                 )
             status.update(label=f"Done. Outputs in {out_dir}", state="complete", expanded=False)
 
@@ -209,14 +293,14 @@ def main() -> None:
         masked_tif = out_dir / "masked_image.tif"
 
         if rgb.exists():
-            col1.image(str(rgb), caption="Before (Input RGB)", use_container_width=True)
+            _st_image(col1, str(rgb), caption="Before (Input RGB)")
         if overlay.exists():
-            col2.image(str(overlay), caption="After (Overlay)", use_container_width=True)
+            _st_image(col2, str(overlay), caption="After (Overlay)")
         if mask.exists():
-            col3.image(str(mask), caption="Mask preview", use_container_width=True)
+            _st_image(col3, str(mask), caption="Mask preview")
         if masked_tif.exists():
             try:
-                col4.image(_rgb_preview_png(str(masked_tif)), caption="After (Masked RGB)", use_container_width=True)
+                _st_image(col4, _rgb_preview_png(str(masked_tif)), caption="After (Masked RGB)")
             except Exception:
                 pass
 

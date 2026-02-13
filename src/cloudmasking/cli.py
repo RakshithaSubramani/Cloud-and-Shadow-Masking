@@ -32,6 +32,28 @@ def build_parser() -> argparse.ArgumentParser:
     pred.add_argument("--device", type=str, default="cuda")
     pred.add_argument("--tile", type=int, default=512, help="Tile size for inference")
     pred.add_argument("--overlap", type=int, default=64, help="Tile overlap")
+    pred.add_argument("--cloud-only", action="store_true", help="Mask clouds only (do not mask shadows)")
+    pred.add_argument(
+        "--cloud-threshold",
+        type=float,
+        default=None,
+        help="Optional cloud confidence threshold in [0,1]. If set, uses thresholding instead of argmax.",
+    )
+    pred.add_argument(
+        "--shadow-threshold",
+        type=float,
+        default=None,
+        help="Optional shadow confidence threshold in [0,1]. If set, uses thresholding instead of argmax.",
+    )
+    pred.add_argument(
+        "--method",
+        type=str,
+        default="model",
+        choices=["model", "rgb_white"],
+        help="Masking method: model (AI) or rgb_white (simple white-cloud detection).",
+    )
+    pred.add_argument("--rgb-brightness", type=float, default=0.8, help="RGB cloud brightness threshold [0,1]")
+    pred.add_argument("--rgb-whiteness", type=float, default=0.2, help="RGB cloud whiteness threshold [0,1]")
 
     pred_sample = sub.add_parser("predict-sample", help="Run inference on a CloudSEN12 sample (no GeoTIFF needed)")
     pred_sample.add_argument("--ckpt", type=_path, required=True, help="Path to model checkpoint (.pt)")
@@ -42,6 +64,28 @@ def build_parser() -> argparse.ArgumentParser:
     pred_sample.add_argument("--device", type=str, default="cuda")
     pred_sample.add_argument("--tile", type=int, default=512, help="Tile size for inference")
     pred_sample.add_argument("--overlap", type=int, default=64, help="Tile overlap")
+    pred_sample.add_argument("--cloud-only", action="store_true", help="Mask clouds only (do not mask shadows)")
+    pred_sample.add_argument(
+        "--cloud-threshold",
+        type=float,
+        default=None,
+        help="Optional cloud confidence threshold in [0,1]. If set, uses thresholding instead of argmax.",
+    )
+    pred_sample.add_argument(
+        "--shadow-threshold",
+        type=float,
+        default=None,
+        help="Optional shadow confidence threshold in [0,1]. If set, uses thresholding instead of argmax.",
+    )
+    pred_sample.add_argument(
+        "--method",
+        type=str,
+        default="model",
+        choices=["model", "rgb_white"],
+        help="Masking method: model (AI) or rgb_white (simple white-cloud detection).",
+    )
+    pred_sample.add_argument("--rgb-brightness", type=float, default=0.8, help="RGB cloud brightness threshold [0,1]")
+    pred_sample.add_argument("--rgb-whiteness", type=float, default=0.2, help="RGB cloud whiteness threshold [0,1]")
 
     prep = sub.add_parser("prepare", help="Prefetch CloudSEN12 samples to local NPZ for faster training")
     prep.add_argument("--data", type=_path, required=True, help="Cache folder for TACO downloads")
@@ -97,6 +141,12 @@ def main() -> None:
             device=args.device,
             tile_size=args.tile,
             overlap=args.overlap,
+            mask_shadow=not bool(args.cloud_only),
+            cloud_threshold=args.cloud_threshold,
+            shadow_threshold=args.shadow_threshold,
+            mask_method=str(args.method),
+            rgb_brightness_threshold=float(args.rgb_brightness),
+            rgb_whiteness_threshold=float(args.rgb_whiteness),
         )
         return
 
@@ -119,6 +169,12 @@ def main() -> None:
             device=args.device,
             tile_size=args.tile,
             overlap=args.overlap,
+            mask_shadow=not bool(args.cloud_only),
+            cloud_threshold=args.cloud_threshold,
+            shadow_threshold=args.shadow_threshold,
+            mask_method=str(args.method),
+            rgb_brightness_threshold=float(args.rgb_brightness),
+            rgb_whiteness_threshold=float(args.rgb_whiteness),
         )
         return
 

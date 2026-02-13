@@ -36,6 +36,12 @@ pip install -e .
 cloudmask check --device cuda
 ```
 
+If CUDA available is False, it means your venv has CPU-only PyTorch installed or you are running Streamlit from a different venv. Run Streamlit like this to force the current venv:
+
+```powershell
+python -m streamlit run .\streamlit_app.py
+```
+
 ## Training (CloudSEN12 via TACO)
 
 CloudSEN12 is provided as a Cloud-Optimized Dataset (TACO). This project uses `tacoreader` to read the dataset and cache it locally.
